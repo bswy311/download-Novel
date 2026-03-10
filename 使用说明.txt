@@ -1,0 +1,42 @@
+小说下载器使用说明
+==================
+
+一、安装依赖
+-----------
+在命令行中运行：
+    pip install -r requirements.txt
+
+二、使用方法
+-----------
+
+方法1：使用批处理文件（Windows）
+    双击运行 download_novel.bat
+
+方法2：使用命令行
+    基本用法：
+        python novel_downloader.py https://www.qb5.io/xs-66401/
+    
+    只生成EPUB格式：
+        python novel_downloader.py https://www.qb5.io/xs-66401/ -f epub
+    
+    只生成TXT格式：
+        python novel_downloader.py https://www.qb5.io/xs-66401/ -f txt
+    
+    指定输出文件名：
+        python novel_downloader.py https://www.qb5.io/xs-66401/ -o "花间骄子"
+
+三、功能特点
+-----------
+✓ 自动获取章节列表
+✓ 下载所有章节内容
+✓ 自动去除广告和无关内容
+✓ 生成带目录的EPUB和TXT文件
+✓ 支持自定义输出格式
+
+四、注意事项
+-----------
+1. 确保网络连接正常
+2. 下载过程可能需要一些时间，请耐心等待
+3. 如果某个章节下载失败，会在文件中标记
+4. 生成的EPUB文件可以在各种电子书阅读器中打开
+

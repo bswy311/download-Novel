@@ -24,13 +24,13 @@ if errorlevel 1 (
     )
 )
 
-REM 下载小说
-echo 开始下载小说...
+REM 启动可视化界面
+echo 正在启动小说下载器图形界面...
 echo.
-python novel_downloader.py https://www.qb5.io/xs-66401/
+python novel_downloader_gui.py
 
 echo.
-echo 完成！
+echo 退出。
 pause
 
 

@@ -9,34 +9,40 @@
 二、使用方法
 -----------
 
-方法1：使用批处理文件（Windows）
+方法1：使用图形界面（推荐）
     双击运行 download_novel.bat
+    在界面中输入小说主页 URL，选择输出格式，点击"开始下载"。
+    支持暂停 / 继续 / 终止操作。
 
 方法2：使用命令行
-    基本用法：
-        python novel_downloader.py https://www.qb5.io/xs-66401/
-    
-    只生成EPUB格式：
-        python novel_downloader.py https://www.qb5.io/xs-66401/ -f epub
-    
-    只生成TXT格式：
-        python novel_downloader.py https://www.qb5.io/xs-66401/ -f txt
-    
-    指定输出文件名：
-        python novel_downloader.py https://www.qb5.io/xs-66401/ -o "花间骄子"
+    python novel_downloader.py https://www.qb5.io/xs-66401/
+
+    可选参数：
+        -f, --format    输出格式：epub / txt / both（默认 both）
+        -o, --output    输出文件名（不含扩展名）
 
 三、功能特点
 -----------
-✓ 自动获取章节列表
-✓ 下载所有章节内容
+✓ 图形界面操作，简单易用
+✓ 自动通过目录页获取章节列表
+✓ 使用"下一页"导航逐章下载，突破反爬虫限制
 ✓ 自动去除广告和无关内容
-✓ 生成带目录的EPUB和TXT文件
-✓ 支持自定义输出格式
+✓ 生成 EPUB（带目录）和 TXT 文件
+✓ 支持暂停下载（保存已下载内容）、继续下载、终止下载
+✓ 终止下载自动清理临时文件
 
-四、注意事项
+四、界面按钮说明
+-----------
+开始下载    启动下载任务
+暂停下载    暂停下载，已下载内容保存为 xxx_partial.txt 供查看
+继续下载    从暂停处继续下载
+终止下载    中断整个任务并删除临时文件
+
+五、注意事项
 -----------
 1. 确保网络连接正常
 2. 下载过程可能需要一些时间，请耐心等待
 3. 如果某个章节下载失败，会在文件中标记
-4. 生成的EPUB文件可以在各种电子书阅读器中打开
+4. 生成的 EPUB 文件可以在各种电子书阅读器中打开
+5. 暂停后生成的 _partial.txt 仅供查看，完成下载后会自动删除
 

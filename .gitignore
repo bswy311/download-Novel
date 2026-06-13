@@ -13,17 +13,14 @@ __pycache__/
 .vscode/
 .idea/
 
-# Downloaded novels (ignore common generated output formats, except the instructions)
+# Downloaded novels (ignore all generated output formats)
 *.epub
-# If you want to keep instruction txt but ignore downloaded novels, 
-# you might want to uncomment the next line and force-add instructions
-# *.txt
-# !使用说明.txt
-# !requirements.txt
+*.txt
 
-# Downloaded novel output
-花间骄子.epub
-花间骄子.txt
+# But keep instructions and requirements
+!使用说明.txt
+!requirements.txt
+!README.md
 
 # WebDriver logs
 geckodriver.log

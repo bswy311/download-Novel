@@ -122,49 +122,58 @@ class NovelDownloader:
                 # 等待页面加载
                 time.sleep(2)
                 
-                # 尝试点击"展开完整列表"按钮
+                # 尝试点击"展开列表"、"查看目录"或"更多章节"按钮
                 try:
-                    # 查找展开按钮（多种可能的选择器）
                     expand_selectors = [
-                        "//a[contains(text(), '展开完整列表')]",
-                        "//a[contains(text(), '展开')]",
-                        "//a[contains(@href, 'javascript') and contains(text(), '展开')]",
-                        "//*[contains(text(), '展开完整列表')]",
+                        "//a[contains(text(), '展开完整列表') or contains(text(), '查看目录') or contains(text(), '全部章节') or contains(text(), '更多章节') or contains(text(), '展开全部') or contains(text(), '查看全部')]",
+                        "//button[contains(text(), '展开完整列表') or contains(text(), '查看目录') or contains(text(), '全部章节') or contains(text(), '更多章节') or contains(text(), '展开全部') or contains(text(), '查看全部')]",
+                        "//*[contains(text(), '展开完整列表') or contains(text(), '查看目录') or contains(text(), '全部章节') or contains(text(), '更多章节') or contains(text(), '展开全部') or contains(text(), '查看全部')]",
                     ]
-                    
-                    expand_button = None
+
+                    clicked_any = False
                     for selector in expand_selectors:
-                        try:
-                            expand_button = WebDriverWait(driver, 3).until(
-                                EC.element_to_be_clickable((By.XPATH, selector))
-                            )
-                            if expand_button:
-                                print("找到展开按钮，正在点击...")
-                                driver.execute_script("arguments[0].click();", expand_button)
-                                time.sleep(2)  # 等待内容加载
-                                print("已点击展开按钮，等待内容加载...")
+                        for _ in range(3):
+                            try:
+                                button = WebDriverWait(driver, 2).until(
+                                    EC.element_to_be_clickable((By.XPATH, selector))
+                                )
+                                if button:
+                                    print(f"找到展开按钮，正在点击 ({selector})...")
+                                    driver.execute_script("arguments[0].click();", button)
+                                    time.sleep(2)
+                                    clicked_any = True
+                                else:
+                                    break
+                            except TimeoutException:
                                 break
-                        except TimeoutException:
-                            continue
-                    
-                    # 如果没找到按钮，尝试直接执行JavaScript展开
-                    if not expand_button:
-                        print("未找到展开按钮，尝试执行JavaScript展开...")
+
+                    if not clicked_any:
+                        print("未找到明确的展开按钮，尝试直接执行JavaScript展开...")
                         driver.execute_script("""
-                            var expandLinks = document.querySelectorAll('a');
-                            for (var i = 0; i < expandLinks.length; i++) {
-                                var text = expandLinks[i].textContent || expandLinks[i].innerText;
-                                if (text && text.includes('展开')) {
-                                    expandLinks[i].click();
-                                    break;
+                            var candidates = [];
+                            var all = document.querySelectorAll('a, button');
+                            for (var i = 0; i < all.length; i++) {
+                                var text = (all[i].textContent || all[i].innerText || '').trim();
+                                if (text && /展开|查看目录|全部章节|更多章节|展开全部|查看全部/.test(text)) {
+                                    candidates.push(all[i]);
+                                }
+                            }
+                            for (var j = 0; j < candidates.length; j++) {
+                                try {
+                                    candidates[j].click();
+                                } catch (e) {
+                                    continue;
                                 }
                             }
                         """)
                         time.sleep(2)
-                    
-                    # 再次等待页面内容加载
+
+                    # 滚动页面，触发可能的懒加载章节列表
+                    driver.execute_script('window.scrollTo(0, document.body.scrollHeight);')
                     time.sleep(2)
-                    
+                    driver.execute_script('window.scrollTo(0, 0);')
+                    time.sleep(1)
+
                 except Exception as e:
                     print(f"点击展开按钮时出错: {e}")
                 
@@ -523,7 +532,31 @@ class NovelDownloader:
                                 chapter_list.append(link)
             
             print(f"方法3和方法4共找到 {len(chapter_list)} 个可能的章节链接")
-        
+
+        # 方法5: 全局提取章节链接，进一步补充可能遗漏的章节
+        if not chapter_list or len(chapter_list) < 200:
+            print("尝试方法5: 全局提取章节链接...")
+            all_links = soup.find_all('a', href=True)
+            for link in all_links:
+                href = link.get('href', '').strip()
+                text = link.get_text().strip()
+
+                if not href:
+                    continue
+                if any(skip in href.lower() for skip in ['javascript:', '#', 'mailto:', 'tel:', 'login', 'search', 'register', 'javascript']):
+                    continue
+                if re.search(r'\.(jpg|png|gif|css|js|ico|svg|pdf)$', href, re.I):
+                    continue
+
+                is_chapter_url = bool(re.search(r'(xs-\d+/\d+\.html|/\d+\.html|/\d+/\d+\.html|chapterlist\.html|all\.html|list\.html)$', href))
+                is_chapter_text = bool(text and re.search(r'第.*章|第.*节|^\d+', text))
+
+                if is_chapter_url or is_chapter_text:
+                    chapter_list.append(link)
+
+            chapter_list = list(dict.fromkeys(chapter_list))
+            print(f"方法5共找到 {len(chapter_list)} 个可能的章节链接")
+
         # 去重并排序
         seen = set()
         for link in chapter_list:
@@ -555,18 +588,201 @@ class NovelDownloader:
         def sort_key(ch):
             # 提取URL中的所有数字
             numbers = re.findall(r'\d+', ch['url'])
-            if numbers:
-                # 使用最后一个数字（通常是章节号）
-                return int(numbers[-1])
-            return 0
+            if not numbers:
+                return 0
+
+            # 如果能从base_url中识别出novel_id，优先选择紧随novel_id之后的数字作为章节号
+            nid = None
+            m = re.search(r'xs-(\d+)', self.base_url)
+            if m:
+                nid = m.group(1)
+
+            if nid:
+                # 在URL中找到 'xs-<nid>' 出现位置，并在其后寻找第一个数字（通常是章节号）
+                pos = ch['url'].find('xs-' + nid)
+                if pos != -1:
+                    substr = ch['url'][pos + len('xs-' + nid):]
+                    m2 = re.search(r'(\d+)\.html', substr)
+                    if m2:
+                        try:
+                            return int(m2.group(1))
+                        except:
+                            pass
+
+            # 如果有多个数字，选择位数最长的数字（通常为章节编号而非页码）
+            if len(numbers) > 1:
+                candidates = [int(n) for n in numbers]
+                return max(candidates, key=lambda x: len(str(x)))
+
+            # 否则使用唯一数字（通常为章节号）
+            return int(numbers[-1])
         
         self.chapters.sort(key=sort_key)
         
-        print(f"找到 {len(self.chapters)} 个章节")
+        print(f"从目录页找到 {len(self.chapters)} 个章节")
         if len(self.chapters) > 0:
             print(f"前3个章节示例: {[ch['title'] for ch in self.chapters[:3]]}")
-        
+
+        # 打印章节总数
+        print(f"共解析到 {len(self.chapters)} 章，即将开始下载")
+        print(f"前3章: {[ch['title'] for ch in self.chapters[:3]]}")
+
         return len(self.chapters) > 0
+
+    @staticmethod
+    def _chapter_num_from_url(url):
+        """从章节URL中提取章节编号（ du-1_2.html → 1, 123_2.html → 123, 1.html → 1 ）"""
+        path = url.rstrip('/')
+        last_seg = path.split('/')[-1] if '/' in path else path
+        if last_seg.endswith('.html'):
+            last_seg = last_seg[:-5]
+        # 去掉分页后缀 _N（如 du-1_2 → du-1, 123_2 → 123）
+        last_seg = re.sub(r'_\d+$', '', last_seg)
+        # 情况1: 纯数字
+        if last_seg.isdigit():
+            return int(last_seg)
+        # 情况2: 文字-数字 或 文字_数字（如 du-1 → 1）
+        m = re.search(r'[_-](\d+)$', last_seg)
+        if m:
+            return int(m.group(1))
+        return None
+
+    @staticmethod
+    def _is_pagination_url(url):
+        """判断是否为同章分页URL（如 du-1_2.html, 123_2.html）"""
+        path = url.rstrip('/')
+        last = path.split('/')[-1] if '/' in path else path
+        # 仅下划线分页，如 du-1_2.html → True，du-1.html → False
+        return bool(re.search(r'_\d+\.html$', last))
+
+    def find_next_chapter_url(self, soup, current_url):
+        """查找章节正文页中的下一章链接（用于章节间导航）"""
+        current_chapter = self._chapter_num_from_url(current_url)
+
+        # 方法1: 找明确的"下一章"文本
+        for link in soup.find_all('a', href=True):
+            text = (link.get_text() or '').strip()
+            href = link.get('href', '')
+            if href.startswith('javascript:'):
+                continue
+            if re.search(r'^(下一章|下章|后一章|后章|下一章[>»]?|next\s*chapter)$', text, re.I):
+                return urljoin(current_url, href)
+
+        # 方法2: 找"下一页"文本链接，排除同章分页
+        for link in soup.find_all('a', href=True):
+            text = (link.get_text() or '').strip()
+            href = link.get('href', '')
+            if href.startswith('javascript:'):
+                continue
+            if re.search(r'^(下一页|下页|后一页|后页|下一页[>»]?|next\s*page)$', text, re.I):
+                target_url = urljoin(current_url, href)
+                target_chapter = self._chapter_num_from_url(target_url)
+                if target_chapter is not None and current_chapter is not None and target_chapter > current_chapter and not self._is_pagination_url(target_url):
+                    return target_url
+
+        # 方法3: 查找所有符合章节URL模式的链接，找 chapter_num = current + 1
+        if current_chapter is not None:
+            for link in soup.find_all('a', href=True):
+                href = link.get('href', '')
+                if href.startswith('javascript:'):
+                    continue
+                target_url = urljoin(current_url, href)
+                tc = self._chapter_num_from_url(target_url)
+                if tc is not None and tc == current_chapter + 1:
+                    return target_url
+
+        # 方法4: 找所有符合章节URL模式的链接中 chapter_num 最小的且 > current
+        if current_chapter is not None:
+            candidates = []
+            for link in soup.find_all('a', href=True):
+                href = link.get('href', '')
+                if href.startswith('javascript:'):
+                    continue
+                target_url = urljoin(current_url, href)
+                tc = self._chapter_num_from_url(target_url)
+                if tc is not None and tc > current_chapter:
+                    candidates.append((tc, target_url))
+            if candidates:
+                candidates.sort()
+                best = candidates[0]
+                if best[0] == current_chapter + 1:
+                    return best[1]
+
+        return None
+
+    def find_next_page_url(self, soup, current_url):
+        """查找章节正文页中的同章分页链接（如 123_2.html），排除章间导航"""
+        current_chapter = self._chapter_num_from_url(current_url)
+
+        # 方法1: rel=next 且 URL 是分页模式或同一章节号
+        next_link = soup.find('a', rel=re.compile('next', re.I))
+        if next_link and next_link.get('href'):
+            href = next_link.get('href')
+            if not href.startswith('javascript:'):
+                target_url = urljoin(current_url, href)
+                # 只有同章分页才跟随
+                if self._is_pagination_url(target_url):
+                    return target_url
+                tc = self._chapter_num_from_url(target_url)
+                if tc is not None and tc == current_chapter:
+                    return target_url
+
+        # 方法2: 找"下一页"链接，但只接受同章分页
+        for link in soup.find_all('a', href=True):
+            text = (link.get_text() or '').strip()
+            if not text:
+                continue
+            if re.search(r'^(下一页|下页|后一页|后页|下一页[>»]?|next\s*page)$', text, re.I):
+                href = link['href']
+                if href.startswith('javascript:'):
+                    continue
+                target_url = urljoin(current_url, href)
+                if self._is_pagination_url(target_url):
+                    return target_url
+                tc = self._chapter_num_from_url(target_url)
+                if tc is not None and current_chapter is not None and tc == current_chapter:
+                    return target_url
+
+        return None
+
+    def extract_content_from_soup(self, soup):
+        """尝试从章节页面提取正文内容"""
+        content = None
+
+        content_div = soup.find('div', id=re.compile('content|text|chapter|booktext', re.I))
+        if content_div:
+            for script in content_div(["script", "style", "noscript"]):
+                script.decompose()
+            content = content_div.get_text(separator='\n')
+
+        if not content or len(content.strip()) < 100:
+            content_div = soup.find('div', class_=re.compile('content|text|chapter|novel|booktext', re.I))
+            if content_div:
+                for script in content_div(["script", "style", "noscript"]):
+                    script.decompose()
+                content = content_div.get_text(separator='\n')
+
+        if not content or len(content.strip()) < 100:
+            divs = soup.find_all('div')
+            max_len = 0
+            best_div = None
+            for div in divs:
+                div_id = div.get('id', '')
+                div_class = ' '.join(div.get('class', []))
+                if any(keyword in (div_id + div_class).lower() for keyword in ['header', 'footer', 'nav', 'menu', 'sidebar', 'ad']):
+                    continue
+                text = div.get_text(separator='\n')
+                if len(text) > max_len and len(text) > 100:
+                    max_len = len(text)
+                    best_div = div
+            if best_div:
+                for script in best_div(["script", "style", "noscript"]):
+                    script.decompose()
+                content = best_div.get_text(separator='\n')
+
+        if content:
+            return self.clean_content(content)
+        return None
     
     def clean_content(self, text):
         """清理文本内容，去除广告和无关内容"""
@@ -616,59 +832,41 @@ class NovelDownloader:
     
     def get_chapter_content(self, chapter_url):
         """获取章节内容"""
-        html = self.get_page(chapter_url)
-        if not html:
-            return None
-        
-        soup = BeautifulSoup(html, 'html.parser')
-        
-        # 尝试多种可能的内容容器
-        content = None
-        
-        # 方法1: 查找id包含content的div
-        content_div = soup.find('div', id=re.compile('content|text|chapter|booktext'))
-        if content_div:
-            # 移除script和style标签
-            for script in content_div(["script", "style", "noscript"]):
-                script.decompose()
-            content = content_div.get_text()
-        
-        # 方法2: 查找class包含content的div
-        if not content or len(content.strip()) < 100:
-            content_div = soup.find('div', class_=re.compile('content|text|chapter|novel|booktext'))
-            if content_div:
-                for script in content_div(["script", "style", "noscript"]):
-                    script.decompose()
-                content = content_div.get_text()
-        
-        # 方法3: 查找最大的文本块
-        if not content or len(content.strip()) < 100:
-            divs = soup.find_all('div')
-            max_len = 0
-            best_div = None
-            for div in divs:
-                # 跳过明显不是内容的div
-                div_id = div.get('id', '')
-                div_class = ' '.join(div.get('class', []))
-                if any(keyword in (div_id + div_class).lower() for keyword in ['header', 'footer', 'nav', 'menu', 'sidebar', 'ad']):
-                    continue
-                text = div.get_text()
-                if len(text) > max_len and len(text) > 100:
-                    max_len = len(text)
-                    best_div = div
-            if best_div:
-                for script in best_div(["script", "style", "noscript"]):
-                    script.decompose()
-                content = best_div.get_text()
-        
-        if content:
-            content = self.clean_content(content)
-            return content
-        
+        current_url = chapter_url
+        visited_urls = set()
+        content_parts = []
+        page_count = 0
+
+        while current_url and current_url not in visited_urls and page_count < 20:
+            visited_urls.add(current_url)
+            html = self.get_page(current_url)
+            if not html:
+                break
+
+            soup = BeautifulSoup(html, 'html.parser')
+            content = self.extract_content_from_soup(soup)
+            if content:
+                content_parts.append(content)
+            else:
+                break
+
+            next_page_url = self.find_next_page_url(soup, current_url)
+            if not next_page_url:
+                break
+
+            if next_page_url in visited_urls:
+                break
+
+            page_count += 1
+            current_url = next_page_url
+            time.sleep(0.8)
+
+        if content_parts:
+            return "\n\n".join(content_parts)
         return None
     
     def download_all_chapters(self):
-        """下载所有章节"""
+        """下载所有章节（基于列表）"""
         print(f"开始下载 {len(self.chapters)} 个章节...")
         for i, chapter in enumerate(self.chapters, 1):
             print(f"正在下载 [{i}/{len(self.chapters)}]: {chapter['title']}")
@@ -681,6 +879,120 @@ class NovelDownloader:
             
             # 避免请求过快
             time.sleep(0.5)
+
+    def navigate_and_download_all(self, progress_callback=None, stop_check=None,
+                                   pause_check=None, pause_save_callback=None):
+        """
+        从第一个章节开始，通过'下一页'导航，边导航边下载所有章节。
+        按真实阅读顺序构建章节列表。
+        """
+        if not self.chapters:
+            print("没有起始章节")
+            return 0
+
+        first_url = self.chapters[0]['url']
+        self.chapters = []  # 清空，按导航顺序重建
+
+        current_url = first_url
+        visited_urls = set()
+        downloaded = 0
+
+        while current_url and current_url not in visited_urls:
+            if stop_check and stop_check():
+                print("下载已终止")
+                break
+
+            # 暂停处理：保存已下载内容并等待
+            if pause_check and pause_check():
+                if downloaded > 0 and pause_save_callback:
+                    pause_save_callback(downloaded)
+                print("下载已暂停，等待继续...")
+                while pause_check and pause_check():
+                    if stop_check and stop_check():
+                        break
+                    time.sleep(0.5)
+                if stop_check and stop_check():
+                    print("下载已终止")
+                    break
+                print("继续下载...")
+
+            visited_urls.add(current_url)
+            downloaded += 1
+
+            html = self.get_page(current_url)
+            if not html:
+                print(f"  无法访问: {current_url}")
+                break
+
+            soup = BeautifulSoup(html, 'html.parser')
+
+            # 提取标题
+            title = None
+            h1 = soup.find('h1')
+            if h1:
+                title = h1.get_text().strip()
+            if not title:
+                title_tag = soup.find('title')
+                if title_tag:
+                    t = title_tag.get_text().strip()
+                    for sep in [' - ', ' – ', '—', '_', '|']:
+                        if sep in t:
+                            t = t.split(sep)[0].strip()
+                    title = t
+            if not title:
+                title = f"第{downloaded}章"
+
+            print(f"正在下载第 {downloaded} 章: {title}")
+
+            # 提取正文（含同章分页）
+            content = self.extract_content_from_soup(soup)
+            if content:
+                page_url = self.find_next_page_url(soup, current_url)
+                while page_url and page_url not in visited_urls:
+                    page_html = self.get_page(page_url)
+                    if page_html:
+                        page_soup = BeautifulSoup(page_html, 'html.parser')
+                        page_content = self.extract_content_from_soup(page_soup)
+                        if page_content:
+                            content += "\n\n" + page_content
+                        next_page = self.find_next_page_url(page_soup, page_url)
+                        if next_page and next_page != page_url:
+                            page_url = next_page
+                            time.sleep(0.8)
+                        else:
+                            break
+                    else:
+                        break
+                    time.sleep(0.8)
+            else:
+                content = "[此章节内容获取失败]"
+                print(f"  警告: 无法获取章节内容")
+
+            self.chapters.append({
+                'title': title,
+                'url': current_url,
+                'content': content
+            })
+
+            # 去除正文开头多余的标题（HTML 的 h1 也被提取进来了）
+            if content:
+                lines = content.split('\n', 1)
+                if lines[0].strip() == title:
+                    self.chapters[-1]['content'] = lines[1].strip() if len(lines) > 1 else ''
+
+            if progress_callback:
+                progress_callback(downloaded, title)
+
+            # 找下一章
+            next_url = self.find_next_chapter_url(soup, current_url)
+            if not next_url or next_url in visited_urls:
+                break
+
+            current_url = next_url
+            time.sleep(0.8)
+
+        print(f"下载完成，共 {downloaded} 章")
+        return downloaded
     
     def save_as_txt(self, filename):
         """保存为TXT格式"""
@@ -692,13 +1004,6 @@ class NovelDownloader:
                 f.write(f"作者: {self.novel_author}\n")
             f.write("=" * 50 + "\n\n")
             
-            # 写入目录
-            f.write("目录\n")
-            f.write("-" * 50 + "\n")
-            for i, chapter in enumerate(self.chapters, 1):
-                f.write(f"{i}. {chapter['title']}\n")
-            f.write("\n" + "=" * 50 + "\n\n")
-            
             # 写入章节内容
             for i, chapter in enumerate(self.chapters, 1):
                 f.write(f"\n\n第 {i} 章: {chapter['title']}\n")
@@ -707,7 +1012,7 @@ class NovelDownloader:
                 f.write("\n")
         
         print(f"TXT文件已保存: {filename}")
-    
+
     def save_as_epub(self, filename):
         """保存为EPUB格式"""
         print(f"正在保存为EPUB格式: {filename}")
@@ -815,8 +1120,8 @@ def main():
         print("无法获取章节列表，请检查URL是否正确")
         return
     
-    # 下载所有章节
-    downloader.download_all_chapters()
+    # 边导航边下载所有章节（按真实顺序）
+    downloader.navigate_and_download_all()
     
     # 确定输出文件名
     if args.output:

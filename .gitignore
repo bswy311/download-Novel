@@ -21,6 +21,10 @@ __pycache__/
 # !使用说明.txt
 # !requirements.txt
 
+# Downloaded novel output
+花间骄子.epub
+花间骄子.txt
+
 # WebDriver logs
 geckodriver.log
 chromedriver.log
